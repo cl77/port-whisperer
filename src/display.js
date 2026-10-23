@@ -1,6 +1,5 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import stringWidth from "string-width";
 
 const ICONS = {
   healthy: chalk.green("●"),
@@ -53,33 +52,33 @@ const FRAMEWORK_COLORS = {
 };
 
 /**
- * Render the header banner
+ * Wrap text in an OSC 8 hyperlink so supporting terminals make it clickable.
+ * Terminals without OSC 8 support just render the plain text.
  */
-const BOX_INNER_WIDTH = 37;
-
-function padToWidth(text, targetWidth) {
-  const actual = stringWidth(text);
-  return text + " ".repeat(Math.max(0, targetWidth - actual));
+function hyperlink(text, url) {
+  return `\u001B]8;;${url}\u0007${text}\u001B]8;;\u0007`;
 }
 
-function renderHeader() {
-  const line1 = "  🔊 Port Whisperer";
-  const line2 = "  listening to your ports...";
-  const border = "─".repeat(BOX_INNER_WIDTH);
-  console.log();
-  console.log(chalk.cyan.bold(` ┌${border}┐`));
-  console.log(
-    chalk.cyan.bold(" │") +
-      chalk.white.bold(padToWidth(line1, BOX_INNER_WIDTH)) +
-      chalk.cyan.bold("│"),
-  );
-  console.log(
-    chalk.cyan.bold(" │") +
-      chalk.gray(padToWidth(line2, BOX_INNER_WIDTH)) +
-      chalk.cyan.bold("│"),
-  );
-  console.log(chalk.cyan.bold(` └${border}┘`));
-  console.log();
+export function formatAddress({ port, host = "localhost" }) {
+  return `${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+/**
+ * Format a port as a clickable address on the host that actually reaches it.
+ */
+function formatPortLink(info) {
+  const address = formatAddress(info);
+  return hyperlink(chalk.white.bold(address), `http://${address}`);
+}
+
+// Link after layout: cli-table3's width math chokes on OSC 8 URLs containing "[" (IPv6).
+function linkifyPorts(rendered, ports) {
+  let out = rendered;
+  for (const p of ports) {
+    const label = chalk.white.bold(formatAddress(p));
+    out = out.replaceAll(`${label} `, `${formatPortLink(p)} `);
+  }
+  return out;
 }
 
 /**
@@ -109,7 +108,7 @@ function formatStatus(status) {
  * Display all ports in a beautiful table
  */
 export function displayPortTable(ports, filtered = false) {
-  renderHeader();
+  console.log();
 
   if (ports.length === 0) {
     console.log(chalk.gray("  No active listening ports found.\n"));
@@ -158,7 +157,7 @@ export function displayPortTable(ports, filtered = false) {
 
   for (const p of ports) {
     table.push([
-      chalk.white.bold(`:${p.port}`),
+      chalk.white.bold(formatAddress(p)),
       chalk.white(p.processName || p.rawName || "—"),
       chalk.gray(String(p.pid)),
       p.projectName ? chalk.blue(truncate(p.projectName, 20)) : chalk.gray("—"),
@@ -168,8 +167,7 @@ export function displayPortTable(ports, filtered = false) {
     ]);
   }
 
-  console.log(table.toString());
-  console.log();
+  console.log(linkifyPorts(table.toString(), ports));
   const allHint = filtered
     ? chalk.gray("  ·  ") +
       chalk.cyan("--all") +
@@ -184,14 +182,13 @@ export function displayPortTable(ports, filtered = false) {
       chalk.gray(" for details") +
       allHint,
   );
-  console.log();
 }
 
 /**
  * Display all processes in a table (ports ps)
  */
 export function displayProcessTable(processes, filtered = false) {
-  renderHeader();
+  console.log();
 
   if (processes.length === 0) {
     console.log(chalk.gray("  No dev processes found.\n"));
@@ -259,7 +256,6 @@ export function displayProcessTable(processes, filtered = false) {
   }
 
   console.log(table.toString());
-  console.log();
   const allHint = filtered
     ? chalk.gray("  ·  ") +
       chalk.cyan("--all") +
@@ -270,14 +266,13 @@ export function displayProcessTable(processes, filtered = false) {
       `  ${processes.length} process${processes.length === 1 ? "" : "es"}`,
     ) + allHint,
   );
-  console.log();
 }
 
 /**
  * Display detailed info for a single port
  */
 export function displayPortDetail(info) {
-  renderHeader();
+  console.log();
 
   if (!info) {
     console.log(chalk.red("  No process found on that port.\n"));
@@ -292,6 +287,7 @@ export function displayPortDetail(info) {
   console.log(chalk.gray("  ─".repeat(22)));
   console.log();
 
+  box("Address", formatPortLink(info));
   box("Process", chalk.white.bold(info.processName || info.rawName || "—"));
   box("PID", chalk.gray(String(info.pid)));
   box("Status", formatStatus(info.status));
@@ -345,7 +341,7 @@ export function displayPortDetail(info) {
  * Display orphaned/zombie process cleanup results
  */
 export function displayCleanResults(orphaned, killed, failed) {
-  renderHeader();
+  console.log();
 
   if (orphaned.length === 0) {
     console.log(
@@ -417,7 +413,7 @@ export function displayWatchEvent(type, info) {
  * Display watch mode header
  */
 export function displayWatchHeader() {
-  renderHeader();
+  console.log();
   console.log(chalk.cyan.bold("  Watching for port changes..."));
   console.log(chalk.gray("  Press Ctrl+C to stop\n"));
 }

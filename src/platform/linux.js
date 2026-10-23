@@ -5,6 +5,7 @@
 import { execSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, readlinkSync } from "fs";
 import { basename } from "path";
+import { createEntryCollector, parseListenHost } from "./address.js";
 
 function commandExists(cmd) {
   try {
@@ -26,8 +27,8 @@ function getProcessNameFromProc(pid) {
 }
 
 export function getListeningPortsRaw() {
-  const entries = [];
-  const portMap = new Map();
+  const collector = createEntryCollector();
+  const { entries } = collector;
 
   if (commandExists("ss")) {
     try {
@@ -46,8 +47,6 @@ export function getListeningPortsRaw() {
         if (!portMatch) continue;
         const port = parseInt(portMatch[1], 10);
 
-        if (portMap.has(port)) continue;
-
         const usersField = parts.slice(5).join(" ");
         const pidMatch = usersField.match(/pid=(\d+)/);
         const nameMatch = usersField.match(/\("([^"]+)"/);
@@ -57,8 +56,7 @@ export function getListeningPortsRaw() {
           const processName = nameMatch
             ? nameMatch[1]
             : getProcessNameFromProc(pid);
-          portMap.set(port, true);
-          entries.push({ port, pid, processName });
+          collector.add(port, pid, processName, parseListenHost(localAddr));
         }
       }
     } catch {}
@@ -82,14 +80,16 @@ export function getListeningPortsRaw() {
         if (!portMatch) continue;
         const port = parseInt(portMatch[1], 10);
 
-        if (portMap.has(port)) continue;
-
         const pidProgram = parts[parts.length - 1];
         const pidProgMatch = pidProgram.match(/^(\d+)\/(.+)$/);
         if (pidProgMatch) {
           const pid = parseInt(pidProgMatch[1], 10);
-          portMap.set(port, true);
-          entries.push({ port, pid, processName: pidProgMatch[2] });
+          collector.add(
+            port,
+            pid,
+            pidProgMatch[2],
+            parseListenHost(localAddr),
+          );
         }
       }
     } catch {}

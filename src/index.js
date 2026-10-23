@@ -2,7 +2,7 @@
 
 import {
   getListeningPorts,
-  getPortDetails,
+  getPortListeners,
   findOrphanedProcesses,
   killProcess,
   watchPorts,
@@ -19,6 +19,7 @@ import {
   displayWatchEvent,
   displayWatchHeader,
   displayProcessTable,
+  formatAddress,
 } from "./display.js";
 import chalk from "chalk";
 import { createInterface } from "readline";
@@ -34,6 +35,43 @@ function spawnTail(filePath, numLines, follow = true) {
   }
   const args = follow ? ["-f", "-n", numLines, filePath] : ["-n", numLines, filePath];
   return spawn("tail", args, { stdio: "inherit" });
+}
+
+// Several processes can listen on one port (e.g. "*" and "[::1]"), so ask which one is meant.
+async function pickListener(listeners, port, { allowAll = false } = {}) {
+  if (listeners.length <= 1) return listeners;
+
+  console.log(
+    chalk.yellow(`  ⚠ ${listeners.length} processes are listening on :${port}:\n`),
+  );
+  const width = Math.max(...listeners.map((l) => formatAddress(l).length));
+  listeners.forEach((l, i) => {
+    const project = l.projectName ? `  ${chalk.blue(l.projectName)}` : "";
+    console.log(
+      `    ${chalk.white.bold(i + 1)}  ${formatAddress(l).padEnd(width)}  ${l.processName} ${chalk.gray(`(PID ${l.pid})`)}${project}`,
+    );
+  });
+  console.log();
+
+  if (!process.stdin.isTTY) {
+    console.log(chalk.gray("  Not interactive - pass the PID instead.\n"));
+    return [];
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const choices = `1-${listeners.length}${allowAll ? ", a = all" : ""}`;
+  const answer = await new Promise((resolve) => {
+    rl.question(chalk.yellow(`  Pick a process (${choices}): `), resolve);
+  });
+  rl.close();
+
+  if (allowAll && answer.trim().toLowerCase() === "a") return listeners;
+  const idx = parseInt(answer, 10) - 1;
+  if (!(idx >= 0 && idx < listeners.length)) {
+    console.log(chalk.red("\n  Invalid selection.\n"));
+    return [];
+  }
+  return [listeners[idx]];
 }
 
 const args = process.argv.slice(2);
@@ -71,7 +109,6 @@ function printWatchFooter() {
       `  Watching · refresh every ${watchIntervalSec}s · last update ${ts} · Ctrl+C to stop`,
     ),
   );
-  console.log();
 }
 
 // Capture everything written to stdout while fn runs, so we can flip the
@@ -166,14 +203,21 @@ async function main() {
   if (!isNaN(portNum)) {
     if (watchMode) {
       await runWatched(async () => {
-        const info = await getPortDetails(portNum);
-        displayPortDetail(info);
+        const listeners = await getPortListeners(portNum);
+        if (listeners.length === 0) displayPortDetail(null);
+        for (const info of listeners) displayPortDetail(info);
       });
       return;
     }
 
-    const info = await getPortDetails(portNum);
-    displayPortDetail(info);
+    const listeners = await getPortListeners(portNum);
+    if (listeners.length > 1) console.log();
+    const [info] = await pickListener(listeners, portNum);
+    if (listeners.length > 1 && !info) {
+      process.exitCode = 1;
+      return;
+    }
+    displayPortDetail(info || null);
 
     if (info) {
       // Interactive kill prompt
@@ -182,7 +226,7 @@ async function main() {
         output: process.stdout,
       });
       rl.question(
-        chalk.yellow(`  Kill process on :${portNum}? [y/N] `),
+        chalk.yellow(`  Kill PID ${info.pid} on ${formatAddress(info)}? [y/N] `),
         (answer) => {
           if (answer.toLowerCase() === "y") {
             const success = killProcess(info.pid);
@@ -417,22 +461,36 @@ async function main() {
           continue;
         }
 
-        const { pid, via } = resolved;
-        const label =
-          via === "port"
-            ? `:${resolved.port} — ${resolved.info?.processName || "unknown"} (PID ${pid})`
-            : `PID ${pid}`;
+        let targets = [resolved];
+        if (resolved.via === "port") {
+          // Ranges mean "free these ports", so every listener goes.
+          const chosen = isFromRange
+            ? resolved.listeners
+            : await pickListener(resolved.listeners, n, { allowAll: true });
+          if (chosen.length === 0) {
+            anyFailed = true;
+            continue;
+          }
+          targets = chosen.map((info) => ({ pid: info.pid, via: "port", port: n, info }));
+        }
 
-        console.log(chalk.white(`  Killing ${label}`));
-        const ok = killProcess(pid, signal);
-        if (ok) {
-          console.log(chalk.green(`  ✓ Sent ${signal} to ${label}`));
-          killed++;
-        } else {
-          console.log(
-            chalk.red(`  ✕ Failed. Try: sudo kill${force ? " -9" : ""} ${pid}`),
-          );
-          anyFailed = true;
+        for (const { pid, via, port, info } of targets) {
+          const label =
+            via === "port"
+              ? `:${port} — ${info?.processName || "unknown"} (PID ${pid})`
+              : `PID ${pid}`;
+
+          console.log(chalk.white(`  Killing ${label}`));
+          const ok = killProcess(pid, signal);
+          if (ok) {
+            console.log(chalk.green(`  ✓ Sent ${signal} to ${label}`));
+            killed++;
+          } else {
+            console.log(
+              chalk.red(`  ✕ Failed. Try: sudo kill${force ? " -9" : ""} ${pid}`),
+            );
+            anyFailed = true;
+          }
         }
       }
 
@@ -497,9 +555,15 @@ async function main() {
         process.exit(1);
       }
 
-      const { pid, via } = resolved;
+      let { pid, via, info } = resolved;
+      if (via === "port" && resolved.listeners.length > 1) {
+        console.log();
+        [info] = await pickListener(resolved.listeners, resolved.port);
+        if (!info) process.exit(1);
+        pid = info.pid;
+      }
       const portLabel = via === "port" ? `:${resolved.port}` : `PID ${pid}`;
-      const processName = resolved.info?.processName || "unknown";
+      const processName = info?.processName || "unknown";
 
       console.log();
       console.log(

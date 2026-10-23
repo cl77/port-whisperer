@@ -4,6 +4,7 @@
 
 import { execSync } from "child_process";
 import { basename } from "path";
+import { createEntryCollector, parseListenHost } from "./address.js";
 
 export function getListeningPortsRaw() {
   let raw;
@@ -17,8 +18,7 @@ export function getListeningPortsRaw() {
   }
 
   const lines = raw.trim().split("\n").slice(1);
-  const portMap = new Map();
-  const entries = [];
+  const collector = createEntryCollector();
 
   for (const line of lines) {
     const parts = line.split(/\s+/);
@@ -32,12 +32,10 @@ export function getListeningPortsRaw() {
     if (!portMatch) continue;
     const port = parseInt(portMatch[1], 10);
 
-    if (portMap.has(port)) continue;
-    portMap.set(port, true);
-    entries.push({ port, pid, processName });
+    collector.add(port, pid, processName, parseListenHost(nameField));
   }
 
-  return entries;
+  return collector.entries;
 }
 
 export function batchProcessInfo(pids) {

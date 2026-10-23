@@ -2,6 +2,7 @@ import { execSync, execFileSync } from "child_process";
 import { existsSync, readFileSync, readdirSync, readlinkSync } from "fs";
 import { join, dirname, basename } from "path";
 import { getPlatform } from "./platform/index.js";
+import { pickLinkHost } from "./platform/address.js";
 
 /**
  * Batch-fetch docker container info mapped by host port.
@@ -54,13 +55,15 @@ export async function getListeningPorts(detailed = false) {
   );
   const dockerMap = hasDocker ? batchDockerInfo() : new Map();
 
-  const results = entries.map(({ port, pid, processName }) => {
+  const results = entries.map(({ port, pid, processName, addresses }) => {
     const ps = psMap.get(pid);
     const cwd = cwdMap.get(pid);
 
     const info = {
       port,
       pid,
+      addresses,
+      host: "localhost",
       processName,
       rawName: processName,
       command: ps ? ps.command : "",
@@ -130,6 +133,13 @@ export async function getListeningPorts(detailed = false) {
 
     return info;
   });
+
+  for (const info of results) {
+    const contested = results
+      .filter((o) => o.port === info.port && o.pid !== info.pid)
+      .flatMap((o) => o.addresses);
+    info.host = pickLinkHost(info.addresses, contested);
+  }
 
   return results.sort((a, b) => a.port - b.port);
 }
@@ -287,11 +297,11 @@ export function isDevProcess(processName, command) {
 }
 
 /**
- * Get detailed info for a specific port.
+ * Get detailed info for every listener on a port (processes can share one on different bind addresses).
  */
-export async function getPortDetails(targetPort) {
+export async function getPortListeners(targetPort) {
   const ports = await getListeningPorts(true);
-  return ports.find((p) => p.port === targetPort) || null;
+  return ports.filter((p) => p.port === targetPort);
 }
 
 function detectFrameworkFromImage(image) {
@@ -523,8 +533,11 @@ export function killProcess(pid, signal = "SIGTERM") {
 export async function resolveKillTarget(n) {
   if (!Number.isInteger(n) || n < 1) return null;
   if (n <= 65535) {
-    const info = await getPortDetails(n);
-    if (info) return { pid: info.pid, via: "port", port: n, info };
+    const listeners = await getPortListeners(n);
+    if (listeners.length > 0) {
+      const info = listeners[0];
+      return { pid: info.pid, via: "port", port: n, info, listeners };
+    }
   }
   if (pidExists(n)) return { pid: n, via: "pid" };
   return null;

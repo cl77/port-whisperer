@@ -9,29 +9,23 @@ Stop guessing which process is hogging port 3000. `port-whisperer` gives you a c
 ```
 $ ports
 
- ┌─────────────────────────────────────┐
- │  Port Whisperer                     │
- │  listening to your ports...         │
- └─────────────────────────────────────┘
-
-┌───────┬─────────┬───────┬──────────────────────┬────────────┬────────┬───────────┐
-│ PORT  │ PROCESS │ PID   │ PROJECT              │ FRAMEWORK  │ UPTIME │ STATUS    │
-├───────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
-│ :3000 │ node    │ 42872 │ frontend             │ Next.js    │ 1d 9h  │ ● healthy │
-├───────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
-│ :3001 │ node    │ 95380 │ preview-app          │ Next.js    │ 2h 40m │ ● healthy │
-├───────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
-│ :4566 │ docker  │ 58351 │ backend-localstack-1 │ LocalStack │ 10d 3h │ ● healthy │
-├───────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
-│ :5432 │ docker  │ 58351 │ backend-postgres-1   │ PostgreSQL │ 10d 3h │ ● healthy │
-├───────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
-│ :6379 │ docker  │ 58351 │ backend-redis-1      │ Redis      │ 10d 3h │ ● healthy │
-└───────┴─────────┴───────┴──────────────────────┴────────────┴────────┴───────────┘
-
+┌────────────────┬─────────┬───────┬──────────────────────┬────────────┬────────┬───────────┐
+│ PORT           │ PROCESS │ PID   │ PROJECT              │ FRAMEWORK  │ UPTIME │ STATUS    │
+├────────────────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
+│ localhost:3000 │ node    │ 42872 │ frontend             │ Next.js    │ 1d 9h  │ ● healthy │
+├────────────────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
+│ localhost:3001 │ node    │ 95380 │ preview-app          │ Next.js    │ 2h 40m │ ● healthy │
+├────────────────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
+│ localhost:4566 │ docker  │ 58351 │ backend-localstack-1 │ LocalStack │ 10d 3h │ ● healthy │
+├────────────────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
+│ localhost:5432 │ docker  │ 58351 │ backend-postgres-1   │ PostgreSQL │ 10d 3h │ ● healthy │
+├────────────────┼─────────┼───────┼──────────────────────┼────────────┼────────┼───────────┤
+│ localhost:6379 │ docker  │ 58351 │ backend-redis-1      │ Redis      │ 10d 3h │ ● healthy │
+└────────────────┴─────────┴───────┴──────────────────────┴────────────┴────────┴───────────┘
   5 ports active  ·  Run ports <number> for details  ·  --all to show everything
 ```
 
-Colors: green = healthy, yellow = orphaned, red = zombie.
+Colors: green = healthy, yellow = orphaned, red = zombie. The PORT column is a clickable link in terminals that support hyperlinks. It shows `localhost:` by default; when several processes share a port on different bind addresses (e.g. one on `*` and one on `[::1]`), each process gets its own row with the explicit address that reaches it, like `127.0.0.1:3006` and `[::1]:3006`.
 
 ## Install
 
@@ -77,6 +71,19 @@ whoisonport 3000
 
 Detailed view: full process tree, repository path, current git branch, memory usage, and an interactive prompt to kill the process.
 
+If several processes listen on the same port (e.g. one on `*:3006` and one on `[::1]:3006`), you get a warning listing them and pick which one you mean. The same picker appears for `ports kill` and `ports logs`; in non-interactive shells pass the PID instead.
+
+```
+$ ports 3006
+
+  ⚠ 2 processes are listening on :3006:
+
+    1  127.0.0.1:3006  node (PID 14425)  bedtime-stories
+    2  [::1]:3006      node (PID 78513)  astra
+
+  Pick a process (1-2):
+```
+
 ### Kill a process
 
 ```bash
@@ -87,7 +94,7 @@ ports kill 42872               # kill by PID
 ports kill -f 3000             # force kill (SIGKILL)
 ```
 
-Resolves port to process automatically. Falls back to PID if no listener matches. Use `-f` when a process won't die gracefully.
+Resolves port to process automatically. Falls back to PID if no listener matches. Use `-f` when a process won't die gracefully. If a port is shared by several processes, you pick one (or `a` for all); port ranges kill every listener without asking.
 
 Port ranges expand into individual kills -- empty ports are silently skipped and shown as a summary:
 

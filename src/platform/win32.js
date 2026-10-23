@@ -4,6 +4,7 @@
 
 import { execSync } from "child_process";
 import { basename, dirname } from "path";
+import { createEntryCollector, parseListenHost } from "./address.js";
 
 function exec(cmd, timeout = 10000) {
   try {
@@ -75,8 +76,8 @@ function getProcessNames(pids) {
 }
 
 export function getListeningPortsRaw() {
-  const entries = [];
-  const portMap = new Map();
+  const collector = createEntryCollector();
+  const { entries } = collector;
 
   const raw = exec("netstat -ano -p TCP");
   if (!raw) return entries;
@@ -93,14 +94,11 @@ export function getListeningPortsRaw() {
     if (!portMatch) continue;
     const port = parseInt(portMatch[1], 10);
 
-    if (portMap.has(port)) continue;
-
     const pid = parseInt(parts[parts.length - 1], 10);
     if (isNaN(pid) || pid === 0) continue;
 
-    portMap.set(port, true);
     pidsToResolve.add(pid);
-    entries.push({ port, pid, processName: "" });
+    collector.add(port, pid, "", parseListenHost(localAddr));
   }
 
   const processNames = getProcessNames([...pidsToResolve]);
